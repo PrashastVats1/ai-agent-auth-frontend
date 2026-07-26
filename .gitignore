@@ -1,0 +1,15 @@
+# Claude
+.claude/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Env
+.env
+
+# OS
+.DS_Store
+Thumbs.db
