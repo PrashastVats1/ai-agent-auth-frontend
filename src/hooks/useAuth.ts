@@ -24,7 +24,7 @@ export function useAuth() {
   }, []);
 
   const login = () => userManager.signinRedirect();
-  const logout = () => userManager.signoutRedirect({ post_logout_redirect_uri: "http://localhost:5173" });
+  const logout = () => userManager.signoutRedirect({ post_logout_redirect_uri: window.location.origin });
 
   return { user, loading, login, logout };
 }
