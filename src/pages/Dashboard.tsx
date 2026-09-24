@@ -44,10 +44,39 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   rejected_method: { label: "Blocked — method not permitted", color: "text-red-600" },
   rejected_time_window: { label: "Blocked — outside allowed hours", color: "text-red-600" },
   rejected_day: { label: "Blocked — day not permitted", color: "text-red-600" },
+  rejected_no_policy: { label: "Blocked — no policy set", color: "text-red-600" },
+  rejected_scope: { label: "Blocked — scope not granted", color: "text-red-600" },
+  rejected_consent: { label: "Blocked — consent invalid, used or expired", color: "text-red-600" },
+  consent_requested: { label: "Consent requested", color: "text-purple-600" },
+  consent_approved: { label: "Consent approved", color: "text-green-600" },
+  consent_denied: { label: "Consent denied", color: "text-red-600" },
+  consent_expired: { label: "Consent expired", color: "text-gray-500" },
+  token_issued: { label: "Token issued", color: "text-blue-600" },
+  token_issued_with_consent: { label: "Token issued (with consent)", color: "text-blue-600" },
 };
 
 function formatAction(action: string) {
   return ACTION_LABELS[action] ?? { label: action, color: "text-gray-600" };
+}
+
+function consentStatus(given: boolean | null) {
+  if (given === true) return "given";
+  if (given === false) return "not given";
+  return "requested";
+}
+
+// FastAPI returns validation problems as {detail: [{msg}, ...]}, other errors as {detail: "..."}
+async function describeError(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    if (Array.isArray(body.detail)) {
+      return body.detail.map((d: { msg: string }) => d.msg.replace(/^Value error, /, "")).join("; ");
+    }
+    if (typeof body.detail === "string") return body.detail;
+  } catch {
+    /* fall through */
+  }
+  return `Request failed (${res.status})`;
 }
 
 export default function Dashboard() {
@@ -58,6 +87,7 @@ export default function Dashboard() {
   const [newAgentClientId, setNewAgentClientId] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [policy, setPolicy] = useState<Partial<Policy>>({});
+  const [policyError, setPolicyError] = useState<string | null>(null);
 
   const fetchAgents = async () => {
     const res = await apiFetch("/api/agents");
@@ -103,6 +133,7 @@ export default function Dashboard() {
 
   const loadPolicy = async (agent: Agent) => {
     setSelectedAgent(agent);
+    setPolicyError(null);
     const res = await apiFetch(`/api/policies/${agent.id}`);
     if (res.ok) {
       setPolicy(await res.json());
@@ -113,10 +144,21 @@ export default function Dashboard() {
 
   const savePolicy = async () => {
     if (!selectedAgent) return;
-    await apiFetch(`/api/policies/${selectedAgent.id}`, {
+    setPolicyError(null);
+    const res = await apiFetch(`/api/policies/${selectedAgent.id}`, {
       method: "PUT",
-      body: JSON.stringify(policy),
+      body: JSON.stringify({
+        allowed_endpoints: policy.allowed_endpoints ?? [],
+        allowed_methods: policy.allowed_methods ?? [],
+        allowed_days: policy.allowed_days ?? [],
+        time_window_start: policy.time_window_start || null,
+        time_window_end: policy.time_window_end || null,
+      }),
     });
+    if (!res.ok) {
+      setPolicyError(await describeError(res));
+      return;
+    }
     setSelectedAgent(null);
   };
 
@@ -186,7 +228,16 @@ export default function Dashboard() {
       {/* Policy editor */}
       {selectedAgent && (
         <section className="border rounded p-4 bg-gray-50">
-          <h2 className="text-lg font-semibold mb-3">Policy for {selectedAgent.name}</h2>
+          <h2 className="text-lg font-semibold mb-1">Policy for {selectedAgent.name}</h2>
+          <p className="text-xs text-gray-500 mb-3">
+            An agent with no policy is blocked. Leave a field empty for no restriction on it. Endpoints can end
+            with * to match a prefix (e.g. /api/orders/*). Times are IST; a window like 22:00–06:00 crosses midnight.
+          </p>
+          {policyError && (
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-3">
+              {policyError}
+            </p>
+          )}
           <div className="space-y-3">
             <label className="block text-sm">
               Allowed endpoints (comma-separated)
@@ -199,7 +250,7 @@ export default function Dashboard() {
               />
             </label>
             <label className="block text-sm">
-              Allowed methods (comma-separated)
+              Allowed methods (comma-separated, e.g. GET, POST)
               <input
                 className="border rounded px-3 py-1.5 w-full mt-1"
                 value={(policy.allowed_methods ?? []).join(", ")}
@@ -220,16 +271,18 @@ export default function Dashboard() {
             </label>
             <div className="flex gap-2 text-sm">
               <label className="block">
-                Time window start (HH:MM)
+                Time window start (IST)
                 <input
+                  type="time"
                   className="border rounded px-3 py-1.5 w-full mt-1"
                   value={policy.time_window_start ?? ""}
                   onChange={(e) => setPolicy({ ...policy, time_window_start: e.target.value || null })}
                 />
               </label>
               <label className="block">
-                Time window end (HH:MM)
+                Time window end (IST)
                 <input
+                  type="time"
                   className="border rounded px-3 py-1.5 w-full mt-1"
                   value={policy.time_window_end ?? ""}
                   onChange={(e) => setPolicy({ ...policy, time_window_end: e.target.value || null })}
@@ -306,7 +359,7 @@ export default function Dashboard() {
                   {agentName} · {new Date(log.timestamp).toLocaleString()}
                   {log.consent_required && (
                     <span className="ml-2 text-purple-500">
-                      · consent {log.consent_given ? "given" : "required"}
+                      · consent {consentStatus(log.consent_given)}
                     </span>
                   )}
                 </div>

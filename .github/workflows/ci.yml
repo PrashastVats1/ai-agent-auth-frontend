@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build   # type-checks with tsc, then builds with Vite
+        env:
+          VITE_MONOCLOUD_ISSUER_URL: https://example.monocloud.com
+          VITE_MONOCLOUD_CLIENT_ID: ci
+          VITE_API_URL: http://localhost:8000
+          VITE_MONOCLOUD_REDIRECT_URI: http://localhost:5173/callback
